@@ -310,6 +310,9 @@ impl State {
         renderpass.set_vertex_buffer(0, self.vertex_buffers[2].slice(..));
         renderpass.draw(0..18, 0..1);
         // End the renderpass.
+        for pipeline in &self.pipelines{
+
+        }
         drop(renderpass);
 
         // Submit the command in the queue to execute
