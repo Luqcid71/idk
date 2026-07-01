@@ -70,12 +70,49 @@ struct State {
     size: winit::dpi::PhysicalSize<u32>,
     surface: wgpu::Surface<'static>,
     surface_format: wgpu::TextureFormat,
-    shader: wgpu::ShaderModule,
-    pipeline: wgpu::RenderPipeline,
+    shaders: Vec<wgpu::ShaderModule>,
+    pipelines: Vec<wgpu::RenderPipeline>,
     vertex_buffers: Vec<wgpu::Buffer>,
 }
 
 impl State {
+    fn create_pipeline(
+        device: &wgpu::Device,
+        layout: &wgpu::PipelineLayout,
+        shader: &wgpu::ShaderModule,
+        surface_format: wgpu::TextureFormat,
+        label: &str,
+    ) -> wgpu::RenderPipeline{
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor { 
+             label: Some(label),
+             layout: Some(layout),
+
+             vertex: wgpu::VertexState{
+                module: shader,
+                entry_point: Some("vs_main"),
+                buffers: &[Vertex::desc()],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+             },
+             fragment: Some(wgpu::FragmentState{
+                module: shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState{
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+             }),
+             primitive: wgpu::PrimitiveState{
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                ..Default::default()
+             },
+             depth_stencil: None,
+             multisample: wgpu::MultisampleState::default(),
+             multiview_mask: None,
+             cache: None,
+             })
+    }
     async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> State {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
             Box::new(display),
@@ -100,45 +137,44 @@ impl State {
     .find(|f| f.is_srgb())
     .unwrap_or(cap.formats[0]);
 //add pipelines and shaders here
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+        let triangle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label : Some("triangle shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
+        });
+        let square_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label : Some("triangle shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Square.wgsl").into()),
+        });
+        let octagon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label : Some("triangle shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Octagon.wgsl").into()),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("pipeline layout"),
             bind_group_layouts: &[],
             immediate_size: 0,
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{
-            label: Some("render pipeline"),
-            layout: Some(&pipeline_layout),
-
-            vertex: wgpu::VertexState{
-                 module: &shader,
-                entry_point: Some("vs_main"),
-                buffers: &[Vertex::desc()],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-            },
-            fragment: Some(wgpu::FragmentState{
-                module: &shader,
-                entry_point: Some("fs_main"),
-                targets: &[Some(wgpu::ColorTargetState{
-                    format: surface_format,
-                    blend: Some(wgpu::BlendState::REPLACE),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: wgpu::PipelineCompilationOptions::default(), 
-            }),
-
-            primitive: wgpu::PrimitiveState{
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let triangle_pipeline = Self::create_pipeline(
+            &device,
+            &pipeline_layout,
+            &triangle_shader,
+            surface_format,
+            "triangle pipeline",
+        );
+        let square_pipeline = Self::create_pipeline(
+            &device,
+            &pipeline_layout,
+            &square_shader,
+            surface_format,
+            "square pipeline",
+        );
+        let octagon_pipeline = Self::create_pipeline(
+            &device,
+            &pipeline_layout,
+            &octagon_shader,
+            surface_format,
+            "octagon pipeline",
+        );
         let triangle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("triangle vertex buffer"),
             contents: bytemuck::cast_slice(TRIANGLE_VERTICIES),
@@ -165,8 +201,8 @@ impl State {
             size,
             surface,
             surface_format,
-            shader,
-            pipeline,
+            shaders: vec![triangle_shader, square_shader, octagon_shader],
+            pipelines: vec![triangle_pipeline, square_pipeline, octagon_pipeline],
             vertex_buffers: vec![triangle_buffer, square_buffer, octagon_buffer],
         };
 
@@ -246,7 +282,12 @@ impl State {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                    load: wgpu::LoadOp::Clear(wgpu::Color{
+                        r: 0.1,
+                        g: 0.1,
+                        b: 0.1,
+                        a: 1.0,
+                    }),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -257,11 +298,15 @@ impl State {
         });
 
         // If you wanted to call any drawing commands, they would go here.
-        renderpass.set_pipeline(&self.pipeline);
-        //renderpass.set_vertex_buffer(0, self.vertex_buffers[0].slice(..));
-        //renderpass.draw(0..3, 0..1);
-        //renderpass.set_vertex_buffer(0, self.vertex_buffers[1].slice(..));
-        //renderpass.draw(0..6, 0..1);
+        renderpass.set_pipeline(&self.pipelines[0]);
+        renderpass.set_vertex_buffer(0, self.vertex_buffers[0].slice(..));
+        renderpass.draw(0..3, 0..1);
+       
+        renderpass.set_pipeline(&self.pipelines[1]);
+        renderpass.set_vertex_buffer(0, self.vertex_buffers[1].slice(..));
+        renderpass.draw(0..6, 0..1);
+       
+        renderpass.set_pipeline(&self.pipelines[2]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[2].slice(..));
         renderpass.draw(0..18, 0..1);
         // End the renderpass.
