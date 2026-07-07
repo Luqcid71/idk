@@ -1,15 +1,36 @@
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
+use glam::{Mat4, Vec3, mat4, vec3};
+use std::f32::consts::FRAC_PI_2;
+use winit::window::Fullscreen;
+use winit::window::CursorGrabMode;
 use winit::{
-    application::ApplicationHandler,
-    event::WindowEvent,
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle},
-    window::{Window, WindowId},
+    application::ApplicationHandler, event::{DeviceEvent, ElementState, KeyEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop, OwnedDisplayHandle}, keyboard::{KeyCode, PhysicalKey}, window::{Window, WindowId},
 };
+struct Camera{
+    position: Vec3,
+    yaw: f32,
+    pitch:f32,
+    }
+    #[derive(Default)]
+    struct CameraController{
+        is_forward_pressed: bool,
+        is_backward_pressed: bool,
+        is_left_pressed: bool,
+        is_right_pressed: bool,
+        is_up_pressed: bool,
+        is_down_pressed: bool,
+        }
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Vertex{
     position: [f32; 3],
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Uniforms{
+    transform: [[f32; 4]; 4],
 }
 impl Vertex{
     fn desc() -> wgpu::VertexBufferLayout<'static>{
@@ -27,18 +48,67 @@ impl Vertex{
     }
 }
 const TRIANGLE_VERTICIES: &[Vertex] = &[
-    Vertex{position: [0.0, 0.5, 0.0]},
+    Vertex{position: [0.0, 0.5, 0.1]},
     Vertex{position: [-0.5, -0.5, 0.0]},
     Vertex{position: [0.5, -0.5, 0.0]}
 ];
 const SQUARE_VERTICIES: & [Vertex] =&[
-    Vertex{position: [0.0, 0.0, 0.0]},
-    Vertex{position: [0.0, 0.5, 0.0]},
-    Vertex{position: [0.5, 0.5, 0.0]},
-    Vertex{position: [0.0, 0.0, 0.0]},
-    Vertex{position: [0.5, 0.5, 0.0]},
-    Vertex{position: [0.5, 0.0, 0.0]},
+    Vertex{position: [0.0, 0.0, -0.1]},
+    Vertex{position: [0.0, 0.5, -0.1]},
+    Vertex{position: [0.5, 0.5, -0.1]},
+    Vertex{position: [0.0, 0.0, -0.1]},
+    Vertex{position: [0.5, 0.5, -0.1]},
+    Vertex{position: [0.5, 0.0, -0.1]},
 
+];
+const CUBE_VERTICES: &[Vertex] = &[
+    // Front face (z = 0.5)
+    Vertex { position: [ 1.0, -0.5,  0.5] },
+    Vertex { position: [ 2.0, -0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5,  0.5] },
+    Vertex { position: [ 1.0, -0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5,  0.5] },
+    Vertex { position: [ 1.0,  0.5,  0.5] },
+
+    // Back face (z = -0.5)
+    Vertex { position: [ 2.0, -0.5, -0.5] },
+    Vertex { position: [ 1.0, -0.5, -0.5] },
+    Vertex { position: [ 1.0,  0.5, -0.5] },
+    Vertex { position: [ 2.0, -0.5, -0.5] },
+    Vertex { position: [ 1.0,  0.5, -0.5] },
+    Vertex { position: [ 2.0,  0.5, -0.5] },
+
+    // Top face (y = 0.5)
+    Vertex { position: [ 1.0,  0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5, -0.5] },
+    Vertex { position: [ 1.0,  0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5, -0.5] },
+    Vertex { position: [ 1.0,  0.5, -0.5] },
+
+    // Bottom face (y = -0.5)
+    Vertex { position: [ 1.0, -0.5, -0.5] },
+    Vertex { position: [ 2.0, -0.5, -0.5] },
+    Vertex { position: [ 2.0, -0.5,  0.5] },
+    Vertex { position: [ 1.0, -0.5, -0.5] },
+    Vertex { position: [ 2.0, -0.5,  0.5] },
+    Vertex { position: [ 1.0, -0.5,  0.5] },
+
+    // Right face (x = 2.0)
+    Vertex { position: [ 2.0, -0.5,  0.5] },
+    Vertex { position: [ 2.0, -0.5, -0.5] },
+    Vertex { position: [ 2.0,  0.5, -0.5] },
+    Vertex { position: [ 2.0, -0.5,  0.5] },
+    Vertex { position: [ 2.0,  0.5, -0.5] },
+    Vertex { position: [ 2.0,  0.5,  0.5] },
+
+    // Left face (x = 1.0)
+    Vertex { position: [ 1.0, -0.5, -0.5] },
+    Vertex { position: [ 1.0, -0.5,  0.5] },
+    Vertex { position: [ 1.0,  0.5,  0.5] },
+    Vertex { position: [ 1.0, -0.5, -0.5] },
+    Vertex { position: [ 1.0,  0.5,  0.5] },
+    Vertex { position: [ 1.0,  0.5, -0.5] },
 ];
 const OCTAGON_VERTICES: & [Vertex] =&[
     Vertex{position: [-0.5, 0.5, 0.0]},
@@ -73,9 +143,72 @@ struct State {
     shaders: Vec<wgpu::ShaderModule>,
     pipelines: Vec<wgpu::RenderPipeline>,
     vertex_buffers: Vec<wgpu::Buffer>,
+    uniform_buffer: wgpu::Buffer,
+    uniform_bind_group: wgpu::BindGroup,
+    start_time: std::time::Instant,
+    depth_texture_view: wgpu::TextureView,
+    camera: Camera,
+    camera_controller: CameraController,
+}
+impl Camera{
+    fn build_view_matrix(&self) -> Mat4{
+        let rotation = Mat4::from_euler(glam::EulerRot::YXZ, self.yaw, self.pitch, 0.0);
+        let forward = rotation.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+
+        Mat4::look_at_rh(self.position, self.position + forward, Vec3::Y)
+    }
 }
 
 impl State {
+    pub fn update_camera(&mut self, speed: f32){
+        // Calculate the direction we are currently facing
+        let rotation = Mat4::from_euler(glam::EulerRot::YXZ, self.camera.yaw, self.camera.pitch, 0.0);
+        let forward = rotation.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+        let upward = rotation.transform_vector3(Vec3::new(0.0, 1.0, 0.0));
+        
+        // Calculate the vector pointing directly to our right
+        let right = rotation.transform_vector3(Vec3::new(1.0, 0.0, 0.0));
+
+        // Apply movement based on which keys are held
+        if self.camera_controller.is_forward_pressed {
+            self.camera.position += forward * speed;
+        }
+        if self.camera_controller.is_backward_pressed {
+            self.camera.position -= forward * speed;
+        }
+        if self.camera_controller.is_right_pressed {
+            self.camera.position += right * speed;
+        }
+        if self.camera_controller.is_left_pressed {
+            self.camera.position -= right * speed;
+        }
+        if self.camera_controller.is_up_pressed{
+            self.camera.position += upward * speed
+        }
+        if self.camera_controller.is_down_pressed{
+            self.camera.position -= upward * speed;
+        }
+        let model = Mat4::IDENTITY; // Keep the world still while the camera moves
+        let view = self.camera.build_view_matrix();
+        let projection = Mat4::perspective_rh(
+            90.0_f32.to_radians(),
+            self.size.width as f32 / self.size.height as f32,
+            0.1,
+            100.0,
+        );
+        
+        let mvp = projection * view * model;
+        
+        let uniforms = Uniforms {
+            transform: mvp.to_cols_array_2d(),
+        };
+        
+        self.queue.write_buffer(
+            &self.uniform_buffer,
+            0,
+            bytemuck::bytes_of(&uniforms),
+        );
+    }
     fn create_pipeline(
         device: &wgpu::Device,
         layout: &wgpu::PipelineLayout,
@@ -107,13 +240,51 @@ impl State {
                 topology: wgpu::PrimitiveTopology::TriangleList,
                 ..Default::default()
              },
-             depth_stencil: None,
+             depth_stencil: Some(wgpu::DepthStencilState{
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+             }),
              multisample: wgpu::MultisampleState::default(),
              multiview_mask: None,
              cache: None,
              })
     }
+    fn create_depth_texture(
+        device: &wgpu::Device,
+        size: winit::dpi::PhysicalSize<u32>,
+    )-> wgpu::TextureView{
+        let size = wgpu::Extent3d{
+            width: size.width.max(1),
+            height: size.height.max(1),
+            depth_or_array_layers: 1,
+        };
+        let desc = wgpu::TextureDescriptor{
+            label: Some("Depth Texture"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Depth32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        };
+        let texture = device.create_texture(&desc);
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
     async fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> State {
+        // Inside State::new()
+        let camera = Camera {
+    position: Vec3::new(0.0, 0.0, 3.0),
+    yaw: 0.0,
+    pitch: 0.0,
+        };
+
+        let camera_controller = CameraController::default();
+
+// Add them to your final `State { ... }` return block
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
             Box::new(display),
         ));
@@ -127,9 +298,61 @@ impl State {
             .unwrap();
 
         let size = window.inner_size();
+        
+        let model = Mat4::from_rotation_y(1.5);
+        
+        let view = Mat4::look_at_rh(
+            Vec3::new(0.0, 0.0, 3.0),
+            Vec3::ZERO,
+            Vec3::Y,
+        );
+        let projection = Mat4::perspective_rh(
+            90.0_f32.to_radians(),
+            size.width as f32/size.height as f32,
+            0.1,
+            100.0,
 
+        );
+        let mvp = projection * view * model;
+        let uniforms = Uniforms{
+            transform: mvp.to_cols_array_2d(),
+        };
+        let uniform_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor{
+                label: Some("uniform buffer"),
+                contents: bytemuck::bytes_of(&uniforms),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+        let uniform_bind_group_layout =
+    device.create_bind_group_layout(
+        &wgpu::BindGroupLayoutDescriptor {
+            label: Some("uniform layout"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        }
+    );
+    let uniform_bind_group =
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("uniform bind group"),
+        layout: &uniform_bind_group_layout,
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform_buffer.as_entire_binding(),
+        }],
+    });
         let surface = instance.create_surface(window.clone()).unwrap();
+        
         let cap = surface.get_capabilities(&adapter);
+        
         let surface_format = cap
     .formats
     .iter()
@@ -137,23 +360,32 @@ impl State {
     .find(|f| f.is_srgb())
     .unwrap_or(cap.formats[0]);
 //add pipelines and shaders here
+        
         let triangle_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label : Some("triangle shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
         });
+        
         let square_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label : Some("triangle shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Square.wgsl").into()),
         });
+        
         let octagon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
             label : Some("triangle shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Octagon.wgsl").into()),
         });
+        let cube_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor{
+            label: Some("cube shader"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Cube.wgsl").into()),
+        });
+        
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor{
             label: Some("pipeline layout"),
-            bind_group_layouts: &[],
+            bind_group_layouts: &[Some(&uniform_bind_group_layout)],
             immediate_size: 0,
         });
+        
         let triangle_pipeline = Self::create_pipeline(
             &device,
             &pipeline_layout,
@@ -161,6 +393,7 @@ impl State {
             surface_format,
             "triangle pipeline",
         );
+        
         let square_pipeline = Self::create_pipeline(
             &device,
             &pipeline_layout,
@@ -168,6 +401,7 @@ impl State {
             surface_format,
             "square pipeline",
         );
+        
         let octagon_pipeline = Self::create_pipeline(
             &device,
             &pipeline_layout,
@@ -175,21 +409,37 @@ impl State {
             surface_format,
             "octagon pipeline",
         );
+        let cube_pipeline = Self::create_pipeline(
+            &device,
+            &pipeline_layout,
+            &cube_shader,
+            surface_format,
+            "cube pipeline",
+            
+        );
         let triangle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("triangle vertex buffer"),
             contents: bytemuck::cast_slice(TRIANGLE_VERTICIES),
             usage:wgpu::BufferUsages::VERTEX,
         });
+        
         let square_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("square vertex buffer"),
             contents: bytemuck::cast_slice(SQUARE_VERTICIES),
             usage:wgpu::BufferUsages::VERTEX,
         });
+        
         let octagon_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("square vertex buffer"),
             contents: bytemuck::cast_slice(OCTAGON_VERTICES),
             usage:wgpu::BufferUsages::VERTEX,
         });
+        let cube_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some("cube vertex buffer"),
+            contents: bytemuck::cast_slice(CUBE_VERTICES),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let depth_texture_view = Self::create_depth_texture(&device, size);
 
 
 
@@ -201,9 +451,15 @@ impl State {
             size,
             surface,
             surface_format,
-            shaders: vec![triangle_shader, square_shader, octagon_shader],
-            pipelines: vec![triangle_pipeline, square_pipeline, octagon_pipeline],
-            vertex_buffers: vec![triangle_buffer, square_buffer, octagon_buffer],
+            shaders: vec![triangle_shader, square_shader, octagon_shader, cube_shader],
+            pipelines: vec![triangle_pipeline, square_pipeline, octagon_pipeline, cube_pipeline],
+            vertex_buffers: vec![triangle_buffer, square_buffer, octagon_buffer, cube_buffer],
+            uniform_buffer,
+            uniform_bind_group,
+            start_time: std::time::Instant::now(),
+            depth_texture_view,
+            camera,
+            camera_controller,
         };
 
         // Configure surface for the first time
@@ -211,7 +467,32 @@ impl State {
 
         state
     }
-
+    pub fn Rotate(&mut self, rotation_X: f32, rotation_y: f32, rotation_z: f32){
+        let model = Mat4::from_euler(glam::EulerRot::XYZ, rotation_X, rotation_y, rotation_y);
+            
+            let view = Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 3.0),
+                Vec3::ZERO,
+                Vec3::Y,
+            );
+            let projection = Mat4::perspective_rh(
+                90.0_f32.to_radians(),
+                self.size.width as f32/ self.size.height as f32,
+                0.1,
+                100.0,
+            );
+            let mvp = projection * view * model;
+            let uniforms = Uniforms{
+                transform: mvp.to_cols_array_2d(),
+            
+            };
+            self.queue.write_buffer(
+                &self.uniform_buffer,
+                0,
+                bytemuck::bytes_of(&uniforms),
+            );
+    }
+    
     fn get_window(&self) -> &Window {
         &self.window
     }
@@ -236,6 +517,7 @@ impl State {
 
         // reconfigure the surface
         self.configure_surface();
+        self.depth_texture_view = Self::create_depth_texture(&self.device, self.size);
     }
 
     fn render(&mut self) {
@@ -271,8 +553,11 @@ impl State {
                 format: Some(self.surface_format.add_srgb_suffix()),
                 ..Default::default()
             });
-
-        // Renders a GREEN screen
+            let time = self.start_time.elapsed().as_secs_f32();
+            //self.Rotate(time, time, time);
+            self.update_camera(0.05);
+            
+        
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // Create the renderpass which will clear the screen.
         let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -283,21 +568,30 @@ impl State {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color{
-                        r: 0.1,
-                        g: 0.1,
-                        b: 0.1,
+                        r: 0.25,
+                        g: 0.6,
+                        b: 1.0,
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,
                 },
             })],
-            depth_stencil_attachment: None,
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment{
+                view: &self.depth_texture_view,
+                depth_ops: Some(wgpu::Operations{
+                    load: wgpu::LoadOp::Clear(1.0),
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
         });
 
         // If you wanted to call any drawing commands, they would go here.
+        
+        renderpass.set_bind_group(0, &self.uniform_bind_group, &[]);
         renderpass.set_pipeline(&self.pipelines[0]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[0].slice(..));
         renderpass.draw(0..3, 0..1);
@@ -309,10 +603,12 @@ impl State {
         renderpass.set_pipeline(&self.pipelines[2]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[2].slice(..));
         renderpass.draw(0..18, 0..1);
+        
+        renderpass.set_pipeline(&self.pipelines[3]);
+        renderpass.set_vertex_buffer(0, self.vertex_buffers[3].slice(..));
+        renderpass.draw(0..36, 0..1);
         // End the renderpass.
-        for pipeline in &self.pipelines{
-
-        }
+        
         drop(renderpass);
 
         // Submit the command in the queue to execute
@@ -328,11 +624,29 @@ struct App {
 }
 
 impl ApplicationHandler for App {
+    fn device_event(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    )
+    {
+        let state = self.state.as_mut().unwrap();
+        if let DeviceEvent::MouseMotion {delta} = event{
+            let sensitivitty = 0.002;
+            state.camera.yaw -=(delta.0 as f32) * sensitivitty;
+            state.camera.pitch -= (delta.1 as f32) * sensitivitty;
+
+            let safe_pitch = FRAC_PI_2 - 0.001;
+            state.camera.pitch = state.camera.pitch.clamp(-safe_pitch, safe_pitch);
+        }
+    }
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         // Create window object
         let window = Arc::new(
             event_loop
-                .create_window(Window::default_attributes())
+                .create_window(Window::default_attributes()
+            .with_fullscreen(Some(Fullscreen::Borderless((None)))))
                 .unwrap(),
         );
 
@@ -340,6 +654,11 @@ impl ApplicationHandler for App {
             event_loop.owned_display_handle(),
             window.clone(),
         ));
+        window.set_cursor_visible(false);
+
+        if let Err(err) = window.set_cursor_grab(CursorGrabMode::Locked){
+            let _ = window.set_cursor_grab(CursorGrabMode::Confined);
+        }
         self.state = Some(state);
 
         window.request_redraw();
@@ -362,12 +681,32 @@ impl ApplicationHandler for App {
                 // here as this event is always followed up by redraw request.
                 state.resize(size);
             }
+            WindowEvent::KeyboardInput { 
+                event: KeyEvent{
+                    physical_key: PhysicalKey::Code(keycode),
+                    state: key_state,
+                    ..
+                },
+                ..
+             }=>{
+                let is_pressed = key_state == ElementState::Pressed;
+                match keycode{
+                    KeyCode::KeyW => state.camera_controller.is_forward_pressed = is_pressed,
+                    KeyCode::KeyS => state.camera_controller.is_backward_pressed = is_pressed,
+                    KeyCode::KeyA => state.camera_controller.is_left_pressed = is_pressed,
+                    KeyCode::KeyD => state.camera_controller.is_right_pressed = is_pressed,
+                    KeyCode::KeyE => state.camera_controller.is_up_pressed = is_pressed,
+                    KeyCode::KeyQ => state.camera_controller.is_down_pressed = is_pressed,
+                    _ => {}
+                }
+             }
             _ => (),
         }
     }
 }
 
 fn main() {
+    
     // wgpu uses `log` for all of our logging, so we initialize a logger with the `env_logger` crate.
     //
     // To change the log level, set the `RUST_LOG` environment variable. See the `env_logger`
@@ -375,11 +714,13 @@ fn main() {
     env_logger::init();
 
     let event_loop = EventLoop::new().unwrap();
+    
 
     // When the current loop iteration finishes, immediately begin a new
     // iteration regardless of whether or not new events are available to
     // process. Preferred for applications that want to render as fast as
     // possible, like games.
+    
     event_loop.set_control_flow(ControlFlow::Poll);
 
     // When the current loop iteration finishes, suspend the thread until
