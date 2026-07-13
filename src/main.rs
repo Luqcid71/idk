@@ -47,91 +47,78 @@ impl Vertex{
         }
     }
 }
-const TRIANGLE_VERTICIES: &[Vertex] = &[
-    Vertex{position: [0.0, 0.5, 0.1]},
-    Vertex{position: [-0.5, -0.5, 0.0]},
-    Vertex{position: [0.5, -0.5, 0.0]}
+const TRIANGLE_VERTICES: &[Vertex] = &[
+    Vertex { position: [ 0.0,  0.5, 0.0] }, // 0: Top
+    Vertex { position: [-0.5, -0.5, 0.0] }, // 1: Bottom Left
+    Vertex { position: [ 0.5, -0.5, 0.0] }, // 2: Bottom Right
 ];
-const SQUARE_VERTICIES: & [Vertex] =&[
-    Vertex{position: [0.0, 0.0, -0.1]},
-    Vertex{position: [0.0, 0.5, -0.1]},
-    Vertex{position: [0.5, 0.5, -0.1]},
-    Vertex{position: [0.0, 0.0, -0.1]},
-    Vertex{position: [0.5, 0.5, -0.1]},
-    Vertex{position: [0.5, 0.0, -0.1]},
 
+const TRIANGLE_INDICES: &[u16] = &[
+    0, 1, 2,
+];
+const SQUARE_VERTICES: &[Vertex] = &[
+    Vertex { position: [-0.5, -0.5, 0.0] }, // 0: Bottom Left
+    Vertex { position: [ 0.5, -0.5, 0.0] }, // 1: Bottom Right
+    Vertex { position: [ 0.5,  0.5, 0.0] }, // 2: Top Right
+    Vertex { position: [-0.5,  0.5, 0.0] }, // 3: Top Left
+];
+
+const SQUARE_INDICES: &[u16] = &[
+    0, 1, 2, // Bottom-right triangle
+    2, 3, 0, // Top-left triangle
 ];
 const CUBE_VERTICES: &[Vertex] = &[
-    // Front face (z = 0.5)
-    Vertex { position: [ 1.0, -0.5,  0.5] },
-    Vertex { position: [ 2.0, -0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5,  0.5] },
-    Vertex { position: [ 1.0, -0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5,  0.5] },
-    Vertex { position: [ 1.0,  0.5,  0.5] },
-
-    // Back face (z = -0.5)
-    Vertex { position: [ 2.0, -0.5, -0.5] },
-    Vertex { position: [ 1.0, -0.5, -0.5] },
-    Vertex { position: [ 1.0,  0.5, -0.5] },
-    Vertex { position: [ 2.0, -0.5, -0.5] },
-    Vertex { position: [ 1.0,  0.5, -0.5] },
-    Vertex { position: [ 2.0,  0.5, -0.5] },
-
-    // Top face (y = 0.5)
-    Vertex { position: [ 1.0,  0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5, -0.5] },
-    Vertex { position: [ 1.0,  0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5, -0.5] },
-    Vertex { position: [ 1.0,  0.5, -0.5] },
-
-    // Bottom face (y = -0.5)
-    Vertex { position: [ 1.0, -0.5, -0.5] },
-    Vertex { position: [ 2.0, -0.5, -0.5] },
-    Vertex { position: [ 2.0, -0.5,  0.5] },
-    Vertex { position: [ 1.0, -0.5, -0.5] },
-    Vertex { position: [ 2.0, -0.5,  0.5] },
-    Vertex { position: [ 1.0, -0.5,  0.5] },
-
-    // Right face (x = 2.0)
-    Vertex { position: [ 2.0, -0.5,  0.5] },
-    Vertex { position: [ 2.0, -0.5, -0.5] },
-    Vertex { position: [ 2.0,  0.5, -0.5] },
-    Vertex { position: [ 2.0, -0.5,  0.5] },
-    Vertex { position: [ 2.0,  0.5, -0.5] },
-    Vertex { position: [ 2.0,  0.5,  0.5] },
-
-    // Left face (x = 1.0)
-    Vertex { position: [ 1.0, -0.5, -0.5] },
-    Vertex { position: [ 1.0, -0.5,  0.5] },
-    Vertex { position: [ 1.0,  0.5,  0.5] },
-    Vertex { position: [ 1.0, -0.5, -0.5] },
-    Vertex { position: [ 1.0,  0.5,  0.5] },
-    Vertex { position: [ 1.0,  0.5, -0.5] },
+    // Front face unique corners
+    Vertex { position: [-0.5, -0.5,  0.5] }, // 0: Front Bottom Left
+    Vertex { position: [ 0.5, -0.5,  0.5] }, // 1: Front Bottom Right
+    Vertex { position: [ 0.5,  0.5,  0.5] }, // 2: Front Top Right
+    Vertex { position: [-0.5,  0.5,  0.5] }, // 3: Front Top Left
+    
+    // Back face unique corners
+    Vertex { position: [-0.5, -0.5, -0.5] }, // 4: Back Bottom Left
+    Vertex { position: [ 0.5, -0.5, -0.5] }, // 5: Back Bottom Right
+    Vertex { position: [ 0.5,  0.5, -0.5] }, // 6: Back Top Right
+    Vertex { position: [-0.5,  0.5, -0.5] }, // 7: Back Top Left
 ];
-const OCTAGON_VERTICES: & [Vertex] =&[
-    Vertex{position: [-0.5, 0.5, 0.0]},
-    Vertex{position: [-0.25, 1.0, 0.0]},
-    Vertex{position: [-0.5, 0.75, 0.0]},
-    Vertex{position: [-0.5, 0.5, 0.0]},
-    Vertex{position: [-0.25, 0.25, 0.0]},
-    Vertex{position: [-0.25, 1.0, 0.0]},
-    Vertex{position: [-0.25, 0.25, 0.0]},
-    Vertex{position: [-0.25, 1.0, 0.0]},
-    Vertex{position: [0.25, 1.0, 0.0]},
-    Vertex{position: [-0.25, 0.25, 0.0]},
-    Vertex{position: [0.25, 0.25, 0.0]},
-    Vertex{position: [0.25, 1.0, 0.0]},
-    Vertex{position: [0.25, 0.25, 0.0]},
-    Vertex{position: [0.5, 0.5, 0.0]},
-    Vertex{position: [0.5, 0.75, 0.0]},
-    Vertex{position: [0.25, 0.25, 0.0]},
-    Vertex{position: [0.5, 0.75, 0.0]},
-    Vertex{position: [0.25, 1.0, 0.0]},
 
-
+const CUBE_INDICES: &[u16] = &[
+    // Front face
+    0, 1, 2, 2, 3, 0,
+    // Right face
+    1, 5, 6, 6, 2, 1,
+    // Back face
+    5, 4, 7, 7, 6, 5,
+    // Left face
+    4, 0, 3, 3, 7, 4,
+    // Bottom face
+    4, 5, 1, 1, 0, 4,
+    // Top face
+    3, 2, 6, 6, 7, 3,
 ];
+const OCTAGON_VERTICES: &[Vertex] = &[
+    Vertex { position: [ 0.0,   0.0,   0.0] }, // 0: Center
+
+    Vertex { position: [ 0.0,   0.5,   0.0] }, // 1: Top
+    Vertex { position: [ 0.35,  0.35,  0.0] }, // 2: Top Right
+    Vertex { position: [ 0.5,   0.0,   0.0] }, // 3: Right
+    Vertex { position: [ 0.35, -0.35,  0.0] }, // 4: Bottom Right
+    Vertex { position: [ 0.0,  -0.5,   0.0] }, // 5: Bottom
+    Vertex { position: [-0.35, -0.35,  0.0] }, // 6: Bottom Left
+    Vertex { position: [-0.5,   0.0,   0.0] }, // 7: Left
+    Vertex { position: [-0.35,  0.35,  0.0] }, // 8: Top Left
+];
+
+const OCTAGON_INDICES: &[u16] = &[
+    0, 1, 2, // Slice 1 (Top-Right)
+    0, 2, 3, // Slice 2
+    0, 3, 4, // Slice 3
+    0, 4, 5, // Slice 4
+    0, 5, 6, // Slice 5
+    0, 6, 7, // Slice 6
+    0, 7, 8, // Slice 7
+    0, 8, 1, // Slice 8 (Closes the shape)
+];
+
 struct State {
     instance: wgpu::Instance,
     window: Arc<Window>,
@@ -149,6 +136,7 @@ struct State {
     depth_texture_view: wgpu::TextureView,
     camera: Camera,
     camera_controller: CameraController,
+    index_buffers: Vec<wgpu::Buffer>,
 }
 impl Camera{
     fn build_view_matrix(&self) -> Mat4{
@@ -160,6 +148,17 @@ impl Camera{
 }
 
 impl State {
+    fn create_index_buffer(
+        device: &wgpu::Device,
+        indices: &[u16],
+        label: &str,
+    ) -> wgpu::Buffer{
+        device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
+            label: Some(label),
+            contents: bytemuck::cast_slice(indices),
+            usage: wgpu::BufferUsages::INDEX,
+        })
+    }
     pub fn update_camera(&mut self, speed: f32){
         // Calculate the direction we are currently facing
         let rotation = Mat4::from_euler(glam::EulerRot::YXZ, self.camera.yaw, self.camera.pitch, 0.0);
@@ -417,15 +416,19 @@ impl State {
             "cube pipeline",
             
         );
+        let triangle_index_buffer = Self::create_index_buffer(&device, TRIANGLE_INDICES, "triangle indices");
+        let square_index_buffer = Self::create_index_buffer(&device, SQUARE_INDICES, "square indices");
+        let octagon_index_buffer = Self::create_index_buffer(&device, OCTAGON_INDICES, "octagon indices");
+        let cube_index_buffer = Self::create_index_buffer(&device, CUBE_INDICES, "cube indices");
         let triangle_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("triangle vertex buffer"),
-            contents: bytemuck::cast_slice(TRIANGLE_VERTICIES),
+            contents: bytemuck::cast_slice(TRIANGLE_VERTICES),
             usage:wgpu::BufferUsages::VERTEX,
         });
         
         let square_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
             label: Some("square vertex buffer"),
-            contents: bytemuck::cast_slice(SQUARE_VERTICIES),
+            contents: bytemuck::cast_slice(SQUARE_VERTICES),
             usage:wgpu::BufferUsages::VERTEX,
         });
         
@@ -460,6 +463,7 @@ impl State {
             depth_texture_view,
             camera,
             camera_controller,
+            index_buffers: vec![triangle_index_buffer, square_index_buffer, octagon_index_buffer, cube_index_buffer],
         };
 
         // Configure surface for the first time
@@ -587,26 +591,30 @@ impl State {
             timestamp_writes: None,
             occlusion_query_set: None,
             multiview_mask: None,
-        });
+        });                                                                                                                                                            
 
         // If you wanted to call any drawing commands, they would go here.
         
         renderpass.set_bind_group(0, &self.uniform_bind_group, &[]);
         renderpass.set_pipeline(&self.pipelines[0]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[0].slice(..));
-        renderpass.draw(0..3, 0..1);
+        renderpass.set_index_buffer(self.index_buffers[0].slice(..), wgpu::IndexFormat::Uint16);
+        renderpass.draw_indexed(0..3, 0, 0..1);
        
         renderpass.set_pipeline(&self.pipelines[1]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[1].slice(..));
-        renderpass.draw(0..6, 0..1);
+        renderpass.set_index_buffer(self.index_buffers[1].slice(..), wgpu::IndexFormat::Uint16);
+        renderpass.draw_indexed(0..6, 0, 0..1);
        
         renderpass.set_pipeline(&self.pipelines[2]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[2].slice(..));
-        renderpass.draw(0..18, 0..1);
+        renderpass.set_index_buffer(self.index_buffers[2].slice(..), wgpu::IndexFormat::Uint16);
+        renderpass.draw_indexed(0..18, 0, 0..1);
         
         renderpass.set_pipeline(&self.pipelines[3]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[3].slice(..));
-        renderpass.draw(0..36, 0..1);
+        renderpass.set_index_buffer(self.index_buffers[3].slice(..), wgpu::IndexFormat::Uint16);
+        renderpass.draw_indexed(0..36, 0, 0..1);
         // End the renderpass.
         
         drop(renderpass);
