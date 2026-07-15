@@ -31,6 +31,7 @@ struct Vertex{
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms{
     transform: [[f32; 4]; 4],
+   
 }
 impl Vertex{
     fn desc() -> wgpu::VertexBufferLayout<'static>{
@@ -97,7 +98,6 @@ const CUBE_INDICES: &[u16] = &[
 ];
 const OCTAGON_VERTICES: &[Vertex] = &[
     Vertex { position: [ 0.0,   0.0,   0.0] }, // 0: Center
-
     Vertex { position: [ 0.0,   0.5,   0.0] }, // 1: Top
     Vertex { position: [ 0.35,  0.35,  0.0] }, // 2: Top Right
     Vertex { position: [ 0.5,   0.0,   0.0] }, // 3: Right
@@ -130,13 +130,14 @@ struct State {
     shaders: Vec<wgpu::ShaderModule>,
     pipelines: Vec<wgpu::RenderPipeline>,
     vertex_buffers: Vec<wgpu::Buffer>,
-    uniform_buffer: wgpu::Buffer,
-    uniform_bind_group: wgpu::BindGroup,
+    uniform_buffers: Vec<wgpu::Buffer>,
+    uniform_bind_groups: Vec<wgpu::BindGroup>,
     start_time: std::time::Instant,
     depth_texture_view: wgpu::TextureView,
     camera: Camera,
     camera_controller: CameraController,
     index_buffers: Vec<wgpu::Buffer>,
+    object_positions: Vec<Vec3>,
 }
 impl Camera{
     fn build_view_matrix(&self) -> Mat4{
@@ -187,26 +188,7 @@ impl State {
         if self.camera_controller.is_down_pressed{
             self.camera.position -= upward * speed;
         }
-        let model = Mat4::IDENTITY; // Keep the world still while the camera moves
-        let view = self.camera.build_view_matrix();
-        let projection = Mat4::perspective_rh(
-            90.0_f32.to_radians(),
-            self.size.width as f32 / self.size.height as f32,
-            0.1,
-            100.0,
-        );
-        
-        let mvp = projection * view * model;
-        
-        let uniforms = Uniforms {
-            transform: mvp.to_cols_array_2d(),
-        };
-        
-        self.queue.write_buffer(
-            &self.uniform_buffer,
-            0,
-            bytemuck::bytes_of(&uniforms),
-        );
+       
     }
     fn create_pipeline(
         device: &wgpu::Device,
@@ -315,14 +297,9 @@ impl State {
         let mvp = projection * view * model;
         let uniforms = Uniforms{
             transform: mvp.to_cols_array_2d(),
+            
         };
-        let uniform_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor{
-                label: Some("uniform buffer"),
-                contents: bytemuck::bytes_of(&uniforms),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            }
-        );
+        
         let uniform_bind_group_layout =
     device.create_bind_group_layout(
         &wgpu::BindGroupLayoutDescriptor {
@@ -339,15 +316,36 @@ impl State {
             }],
         }
     );
-    let uniform_bind_group =
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("uniform bind group"),
-        layout: &uniform_bind_group_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: uniform_buffer.as_entire_binding(),
-        }],
-    });
+    let object_positions = vec![
+        Vec3::new(-2.0, 0.0, 0.0),
+        Vec3::new(2.0, 0.0, 0.0),
+        Vec3::new(0.0, 2.0, 0.0),
+        Vec3::new(0.0, -2.0, 0.0),
+
+    ];
+    let mut uniform_buffers = Vec::new();
+    let mut uniform_bind_groups = Vec::new();
+
+    for _ in &object_positions{
+        let buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor{
+                label: Some("uniform buffer"),
+                contents: bytemuck::bytes_of(&Uniforms {transform: Mat4::IDENTITY.to_cols_array_2d()}),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            }
+        );
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
+            label: Some("uniform bind group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry{
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }]
+        });
+        uniform_buffers.push(buffer);
+        uniform_bind_groups.push(bind_group);
+    }
+    
         let surface = instance.create_surface(window.clone()).unwrap();
         
         let cap = surface.get_capabilities(&adapter);
@@ -457,13 +455,14 @@ impl State {
             shaders: vec![triangle_shader, square_shader, octagon_shader, cube_shader],
             pipelines: vec![triangle_pipeline, square_pipeline, octagon_pipeline, cube_pipeline],
             vertex_buffers: vec![triangle_buffer, square_buffer, octagon_buffer, cube_buffer],
-            uniform_buffer,
-            uniform_bind_group,
+            uniform_buffers,
+            uniform_bind_groups,
             start_time: std::time::Instant::now(),
             depth_texture_view,
             camera,
             camera_controller,
             index_buffers: vec![triangle_index_buffer, square_index_buffer, octagon_index_buffer, cube_index_buffer],
+            object_positions,
         };
 
         // Configure surface for the first time
@@ -471,31 +470,7 @@ impl State {
 
         state
     }
-    pub fn Rotate(&mut self, rotation_X: f32, rotation_y: f32, rotation_z: f32){
-        let model = Mat4::from_euler(glam::EulerRot::XYZ, rotation_X, rotation_y, rotation_y);
-            
-            let view = Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 3.0),
-                Vec3::ZERO,
-                Vec3::Y,
-            );
-            let projection = Mat4::perspective_rh(
-                90.0_f32.to_radians(),
-                self.size.width as f32/ self.size.height as f32,
-                0.1,
-                100.0,
-            );
-            let mvp = projection * view * model;
-            let uniforms = Uniforms{
-                transform: mvp.to_cols_array_2d(),
-            
-            };
-            self.queue.write_buffer(
-                &self.uniform_buffer,
-                0,
-                bytemuck::bytes_of(&uniforms),
-            );
-    }
+    
     
     fn get_window(&self) -> &Window {
         &self.window
@@ -561,6 +536,31 @@ impl State {
             //self.Rotate(time, time, time);
             self.update_camera(0.05);
             
+            let view = self.camera.build_view_matrix();
+        let projection = Mat4::perspective_rh(
+            45.0_f32.to_radians(), // 45 degrees is standard! 90 stretches things weirdly.
+            self.size.width as f32 / self.size.height as f32,
+            0.1,
+            100.0,
+        );
+        let view_proj = projection * view;
+
+        // 2. Loop through each object, translate it, and write to its specific buffer
+        for (i, position) in self.object_positions.iter().enumerate() {
+            let model = Mat4::from_translation(*position);
+            let mvp = view_proj * model; // Combine camera and object position
+            
+            let uniforms = Uniforms {
+                transform: mvp.to_cols_array_2d(),
+            };
+            
+            // This is the missing link! Writing the math to the GPU buffer
+            self.queue.write_buffer(
+                &self.uniform_buffers[i],
+                0,
+                bytemuck::bytes_of(&uniforms),
+            );
+        }
         
         let mut encoder = self.device.create_command_encoder(&Default::default());
         // Create the renderpass which will clear the screen.
@@ -595,27 +595,33 @@ impl State {
 
         // If you wanted to call any drawing commands, they would go here.
         
-        renderpass.set_bind_group(0, &self.uniform_bind_group, &[]);
+       // Triangle
+        renderpass.set_bind_group(0, &self.uniform_bind_groups[0], &[]);
         renderpass.set_pipeline(&self.pipelines[0]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[0].slice(..));
         renderpass.set_index_buffer(self.index_buffers[0].slice(..), wgpu::IndexFormat::Uint16);
         renderpass.draw_indexed(0..3, 0, 0..1);
        
+        // Square
+        renderpass.set_bind_group(0, &self.uniform_bind_groups[1], &[]);
         renderpass.set_pipeline(&self.pipelines[1]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[1].slice(..));
         renderpass.set_index_buffer(self.index_buffers[1].slice(..), wgpu::IndexFormat::Uint16);
         renderpass.draw_indexed(0..6, 0, 0..1);
        
+        // Octagon
+        renderpass.set_bind_group(0, &self.uniform_bind_groups[2], &[]);
         renderpass.set_pipeline(&self.pipelines[2]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[2].slice(..));
         renderpass.set_index_buffer(self.index_buffers[2].slice(..), wgpu::IndexFormat::Uint16);
-        renderpass.draw_indexed(0..18, 0, 0..1);
+        renderpass.draw_indexed(0..24, 0, 0..1);
         
+        // Cube
+        renderpass.set_bind_group(0, &self.uniform_bind_groups[3], &[]);
         renderpass.set_pipeline(&self.pipelines[3]);
         renderpass.set_vertex_buffer(0, self.vertex_buffers[3].slice(..));
         renderpass.set_index_buffer(self.index_buffers[3].slice(..), wgpu::IndexFormat::Uint16);
         renderpass.draw_indexed(0..36, 0, 0..1);
-        // End the renderpass.
         
         drop(renderpass);
 
