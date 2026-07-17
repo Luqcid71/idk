@@ -1,4 +1,8 @@
 use glam::{Mat4, Vec3, mat4, vec3};
+mod chunk;
+mod mesh_data;
+mod chunk_mesh;
+mod world_manager;
 use image::GenericImageView;
 use noise::{NoiseFn, Perlin};
 use std::collections::HashMap;
@@ -15,15 +19,14 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-const xmin: i32 = -25;
-const xmax: i32 = 25;
-const zmin: i32 = -25;
-const zmax: i32 = 25;
+
+use crate::chunk::Chunk;
+
 const CHUNK_DIRECTIONS: [[i32; 2]; 4] = [
-    [ 1,  0], // East (+X)
-    [-1,  0], // West (-X)
-    [ 0,  1], // South (+Z)
-    [ 0, -1], // North (-Z)
+    [1, 0],  // East (+X)
+    [-1, 0], // West (-X)
+    [0, 1],  // South (+Z)
+    [0, -1], // North (-Z)
 ];
 struct Camera {
     position: Vec3,
@@ -46,13 +49,6 @@ struct Vertex {
     tex_coords: [f32; 2],
 }
 
-pub struct ChunkMesh {
-    pub vertex_buffer: wgpu::Buffer,
-    pub index_buffer: wgpu::Buffer,
-    pub num_indices: u32,
-    pub pos_x: i32,
-    pub pos_z: i32,
-}
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
 struct Uniforms {
@@ -81,280 +77,11 @@ impl Vertex {
 
 const CHUNK_SIZE: i32 = 25;
 const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
-const DIRECTIONS: [[i32; 3]; 6] = [
-    [1, 0, 0],  // Right: look 1 block over on the positive X axis
-    [-1, 0, 0], // Left: look 1 block over on the negative X axis
-    [0, 1, 0],  // Top: look 1 block up on the positive Y axis
-    [0, -1, 0], // Bottom: look 1 block down on the negative Y axis
-    [0, 0, 1],  // Front: look 1 block forward on the positive Z axis
-    [0, 0, -1], // Back: look 1 block backward on the negative Z axis
-];
-struct Chunk {
-    voxels: [u8; CHUNK_VOLUME],
-    pos_x: i32,
-    pos_z: i32,
-    pub chunk_mesh: ChunkMesh,
-}
-const worldsize: i32 = xmin - xmax;
 
-impl Chunk {
-    
-    pub fn generate_chunk_mesh(pos_x: i32, pos_z: i32, device: &wgpu::Device, voxels: [u8; CHUNK_VOLUME]) -> ChunkMesh {
-        let mut vertices: Vec<Vertex> = Vec::new();
-        let mut indices: Vec<u16> = Vec::new();
-        let mut vertex_count: u16 = 0;
-        for z in 0..CHUNK_SIZE {
-            for y in 0..CHUNK_SIZE {
-                for x in 0..CHUNK_SIZE {
-                    let current_voxel = Self::get_voxel(x, y, z, pos_x, pos_z, voxels);
 
-                    if current_voxel == 0 {
-                        continue;
-                    }
 
-                    for (face_index, dir) in DIRECTIONS.iter().enumerate() {
-                        let neighbor_x = x + dir[0];
-                        let neighbor_y = y + dir[1];
-                        let neighbor_z = z + dir[2];
-                        let neighbor_voxel = Self::get_voxel(neighbor_x, neighbor_y, neighbor_z, pos_x, pos_z, voxels);
 
-                        if neighbor_voxel == 0 {
-                            
-                            let face_verts = Self::get_face_vertices(
-                                face_index,
-                                (x + (pos_x * CHUNK_SIZE)) as f32,
-                                y as f32,
-                                (z + (pos_z * CHUNK_SIZE)) as f32,
-                            );
 
-                            vertices.extend_from_slice(&face_verts);
-
-                            let index_pattern = [
-                                vertex_count,
-                                vertex_count + 1,
-                                vertex_count + 2,
-                                vertex_count + 2,
-                                vertex_count + 3,
-                                vertex_count,
-                            ];
-
-                            indices.extend_from_slice(&index_pattern);
-
-                            vertex_count += 4;
-                        }
-                    }
-                }
-            }
-        }
-        
-        
-        
-        let chunk_num_indices = indices.len() as u32;
-
-        let chunk_vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Vertex Buffer"),
-            contents: bytemuck::cast_slice(&vertices),
-            usage: wgpu::BufferUsages::VERTEX,
-        });
-        let chunk_index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Chunk Index Buffer"),
-            contents: bytemuck::cast_slice(&indices),
-            usage: wgpu::BufferUsages::INDEX,
-        });
-        ChunkMesh {
-            vertex_buffer: chunk_vertex_buffer,
-            index_buffer: chunk_index_buffer,
-            num_indices: chunk_num_indices,
-            pos_x,
-            pos_z,
-        }
-    }
-    pub fn get_index(x: i32, y: i32, z: i32) -> usize {
-        (x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE) as usize
-    }
-    
-    pub fn gen_terrain(chunk_x: i32, chunk_z: i32) -> ([u8; CHUNK_VOLUME]){
-        let mut voxels  = [0; CHUNK_VOLUME];
-         let perlin = Perlin::new(89);
-
-        let scale = 0.05;
-
-        for z in 0..CHUNK_SIZE {
-            for x in 0..CHUNK_SIZE {
-                let world_x = (chunk_x * CHUNK_SIZE + x) as f64;
-                let world_z = (chunk_z * CHUNK_SIZE + z) as f64;
-
-                let noise_value = perlin.get([world_x * scale, world_z * scale]);
-
-                let normalized_noise = (noise_value + 1.0) / 2.0;
-
-                let terrain_height = (normalized_noise * CHUNK_SIZE as f64) as i32;
-
-                for y in 0..CHUNK_SIZE {
-                    if y <= terrain_height {
-                        let index = Self::get_index(x, y, z);
-                        voxels[index] = 1;
-                    } else {
-                        let index = Self::get_index(x, y, z);
-                        voxels[index] = 0
-                    }
-                }
-            }
-        }
-        voxels
-    }
-    pub fn get_voxel( x: i32, y: i32, z: i32, chunk_x: i32, chunk_z: i32, voxels: [u8; CHUNK_VOLUME]) -> u8 {
-        if x < 0 || x >= CHUNK_SIZE || y < 0 || y >= CHUNK_SIZE || z < 0 || z >= CHUNK_SIZE {
-            return 0;
-        }
-        
-        voxels[Self::get_index(x, y, z)]
-    }
-    pub fn find_adjacent_chunk(chunk_x: i32, chunk_z: i32){
-        for dir in DIRECTIONS.iter(){
-            let neighbor_positive_x: i32 = chunk_x + dir[0];           
-            let neighbor_positive_z: i32 = chunk_z + dir[2];
-        }
-    }
-    pub fn new(chunk_x: i32, chunk_z: i32, device: &wgpu::Device) -> Self {
-        let voxels: [u8; CHUNK_VOLUME] = Self::gen_terrain(chunk_x, chunk_z);
-        let chunk_mesh: ChunkMesh = Self::generate_chunk_mesh( chunk_x, chunk_z, device, voxels);
-        let mut chunk = Self {
-            voxels: voxels,
-            pos_x: chunk_x,
-            pos_z: chunk_z,
-            chunk_mesh: chunk_mesh,
-        };
-
-       chunk
-    }
-
-    
-    pub fn get_face_vertices(face_index: usize, x: f32, y: f32, z: f32) -> [Vertex; 4] {
-        let x1 = x + 1.0;
-        let y1 = y + 1.0;
-        let z1 = z + 1.0;
-
-        match face_index {
-            // 0: Right face (+X)
-            0 => [
-                Vertex {
-                    position: [x1, y, z1],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x1, y, z],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x1, y1, z],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x1, y1, z1],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            // 1: Left face (-X)
-            1 => [
-                Vertex {
-                    position: [x, y, z],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x, y, z1],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x, y1, z1],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x, y1, z],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            // 2: Top Face (+Y)
-            2 => [
-                Vertex {
-                    position: [x1, y1, z],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x, y1, z],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x, y1, z1],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x1, y1, z1],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            // 3: Bottom Face (-Y)
-            3 => [
-                Vertex {
-                    position: [x1, y, z1],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x, y, z1],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x, y, z],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x1, y, z],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            // 4: Front Face (+Z)
-            4 => [
-                Vertex {
-                    position: [x, y, z1],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x1, y, z1],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x1, y1, z1],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x, y1, z1],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            // 5: Back Face (-Z)
-            5 => [
-                Vertex {
-                    position: [x1, y, z],
-                    tex_coords: [1.0, 1.0],
-                }, // Bottom-Right
-                Vertex {
-                    position: [x, y, z],
-                    tex_coords: [0.0, 1.0],
-                }, // Bottom-Left
-                Vertex {
-                    position: [x, y1, z],
-                    tex_coords: [0.0, 0.0],
-                }, // Top-Left
-                Vertex {
-                    position: [x1, y1, z],
-                    tex_coords: [1.0, 0.0],
-                }, // Top-Right
-            ],
-            _ => panic!("Invalid face index"),
-        }
-    }
-    
-}
 struct State {
     instance: wgpu::Instance,
     window: Arc<Window>,
@@ -367,6 +94,7 @@ struct State {
     pipelines: Vec<wgpu::RenderPipeline>,
     chunks: HashMap<(i32, i32), Chunk>,
     
+
     uniform_buffers: Vec<wgpu::Buffer>,
     uniform_bind_groups: Vec<wgpu::BindGroup>,
     diffuse_bind_group: wgpu::BindGroup,
@@ -374,7 +102,7 @@ struct State {
     depth_texture_view: wgpu::TextureView,
     camera: Camera,
     camera_controller: CameraController,
-    
+
     object_positions: Vec<Vec3>,
 }
 impl Camera {
@@ -387,9 +115,7 @@ impl Camera {
 }
 
 impl State {
-    pub fn build_chunks(&self, chunk_pos_x: i32, chunk_pos_z: i32, device: &wgpu::Device){
-        let chunk = Chunk::new(chunk_pos_x, chunk_pos_z, device);
-    }
+    
     fn create_index_buffer(device: &wgpu::Device, indices: &[u16], label: &str) -> wgpu::Buffer {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
@@ -397,7 +123,7 @@ impl State {
             usage: wgpu::BufferUsages::INDEX,
         })
     }
-    
+
     pub fn update_camera(&mut self, speed: f32) {
         // Calculate the direction we are currently facing
         let rotation =
@@ -600,42 +326,43 @@ impl State {
                     count: None,
                 }],
             });
-            let texture_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-    entries: &[
-        wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Texture {
-                multisampled: false,
-                view_dimension: wgpu::TextureViewDimension::D2,
-                sample_type: wgpu::TextureSampleType::Float { filterable: true },
-            },
-            count: None,
-        },
-        wgpu::BindGroupLayoutEntry {
-            binding: 1,
-            visibility: wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-            count: None,
-        },
-    ],
-    label: Some("texture_bind_group_layout"),
-});
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("texture_bind_group_layout"),
+            });
 
-let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-    layout: &texture_bind_group_layout,
-    entries: &[
-        wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
-        },
-        wgpu::BindGroupEntry {
-            binding: 1,
-            resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
-        }
-    ],
-    label: Some("diffuse_bind_group"),
-});
+        let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &texture_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&diffuse_sampler),
+                },
+            ],
+            label: Some("diffuse_bind_group"),
+        });
         let object_positions = vec![
             Vec3::new(-2.0, 0.0, 0.0),
             Vec3::new(2.0, 0.0, 0.0),
@@ -682,23 +409,13 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
         });
 
-        let square_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("triangle shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Square.wgsl").into()),
-        });
-
-        let octagon_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("triangle shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Octagon.wgsl").into()),
-        });
-        let cube_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("cube shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/Cube.wgsl").into()),
-        });
-
+       
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
-            bind_group_layouts: &[Some(&uniform_bind_group_layout), Some(&texture_bind_group_layout)],
+            bind_group_layouts: &[
+                Some(&uniform_bind_group_layout),
+                Some(&texture_bind_group_layout),
+            ],
             immediate_size: 0,
         });
 
@@ -710,47 +427,13 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             "triangle pipeline",
         );
 
-        let square_pipeline = Self::create_pipeline(
-            &device,
-            &pipeline_layout,
-            &square_shader,
-            surface_format,
-            "square pipeline",
-        );
-
-        let octagon_pipeline = Self::create_pipeline(
-            &device,
-            &pipeline_layout,
-            &octagon_shader,
-            surface_format,
-            "octagon pipeline",
-        );
-        let cube_pipeline = Self::create_pipeline(
-            &device,
-            &pipeline_layout,
-            &cube_shader,
-            surface_format,
-            "cube pipeline",
-        );
         
+
         let depth_texture_view = Self::create_depth_texture(&device, size);
 
         // 1. Generate our initial terrain chunk
-        
-        let mut chunks = HashMap::new();
-
-        for x in xmin..xmax {
-    for z in zmin..zmax {
-            let chunk1 = Chunk::new(x, z, &device);
-            
-        
-         
-                chunks.insert((x, z), chunk1);
-               
-
-            }
-        }   
-        
+        let manager = world_manager::WorldManager::generate_world(&device);
+        let chunks = manager.chunks;
 
         let state = State {
             instance,
@@ -760,12 +443,10 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             size,
             surface,
             surface_format,
-            shaders: vec![triangle_shader, square_shader, octagon_shader, cube_shader],
+            shaders: vec![triangle_shader, ],
             pipelines: vec![
                 triangle_pipeline,
-                square_pipeline,
-                octagon_pipeline,
-                cube_pipeline,
+                
             ],
             chunks,
             uniform_buffers,
@@ -775,7 +456,7 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             depth_texture_view,
             camera,
             camera_controller,
-            
+
             object_positions,
         };
 
@@ -909,7 +590,6 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
         renderpass.set_bind_group(0, &self.uniform_bind_groups[0], &[]);
         renderpass.set_bind_group(1, &self.diffuse_bind_group, &[]);
 
-
         // Bind your voxel shader pipeline
         renderpass.set_pipeline(&self.pipelines[0]);
 
@@ -919,14 +599,15 @@ let diffuse_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                     renderpass.set_index_buffer(self.chunk_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
                     renderpass.draw_indexed(0..self.chunk_num_indices, 0, 0..1);
         }*/
-        
+
         for (i, chunk) in self.chunks.values().enumerate() {
             if chunk.chunk_mesh.num_indices > 0 {
                 renderpass.set_vertex_buffer(0, chunk.chunk_mesh.vertex_buffer.slice(..));
-                renderpass
-                    .set_index_buffer(chunk.chunk_mesh.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+                renderpass.set_index_buffer(
+                    chunk.chunk_mesh.index_buffer.slice(..),
+                    wgpu::IndexFormat::Uint16,
+                );
                 renderpass.draw_indexed(0..chunk.chunk_mesh.num_indices, 0, 0..1);
-                
             } else {
                 println!("failed to render chunk: {i}");
             }
