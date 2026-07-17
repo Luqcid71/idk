@@ -15,10 +15,10 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-const xmin: i32 = -2;
-const xmax: i32 = 2;
-const zmin: i32 = -2;
-const zmax: i32 = 2;
+const xmin: i32 = -25;
+const xmax: i32 = 25;
+const zmin: i32 = -25;
+const zmax: i32 = 25;
 const CHUNK_DIRECTIONS: [[i32; 2]; 4] = [
     [ 1,  0], // East (+X)
     [-1,  0], // West (-X)
