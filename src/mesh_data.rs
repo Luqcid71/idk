@@ -1,6 +1,6 @@
 use noise::{NoiseFn, Perlin};
 
-pub const CHUNK_SIZE: i32 = 25;
+pub const CHUNK_SIZE: i32 = 32;
 pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
 pub struct MeshData {
     pub voxels: [u8; CHUNK_VOLUME],

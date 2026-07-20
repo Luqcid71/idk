@@ -77,7 +77,7 @@ impl Vertex {
     }
 }
 
-const CHUNK_SIZE: i32 = 25;
+const CHUNK_SIZE: i32 = 32;
 const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
 struct State {
@@ -102,6 +102,8 @@ struct State {
     camera_controller: CameraController,
 
     object_positions: Vec<Vec3>,
+    chunk_uniform_buffer: wgpu::Buffer,
+    chunk_uniform_bind_group: wgpu::BindGroup,
 }
 impl Camera {
     fn build_view_matrix(&self) -> Mat4 {
@@ -433,8 +435,24 @@ impl State {
         for (key, _value) in &chunks {
             println!("{},{}", key.0, key.1);
         }
-
+        let chunk_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("chunk uniform buffer"),
+            contents: bytemuck::bytes_of(&Uniforms {
+                transform: Mat4::IDENTITY.to_cols_array_2d(),
+            }),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let chunk_uniform_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("chunk uniform bind group"),
+            layout: &uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: chunk_uniform_buffer.as_entire_binding(),
+            }],
+        });
         let state = State {
+            chunk_uniform_bind_group,
+            chunk_uniform_buffer,
             instance,
             window,
             device,
@@ -552,6 +570,16 @@ impl State {
         }
 
         let mut encoder = self.device.create_command_encoder(&Default::default());
+        // Chunks share one view_proj-only transform (no per-object translation —
+        // chunk vertices are already baked in world space)
+        let chunk_uniforms = Uniforms {
+            transform: view_proj.to_cols_array_2d(),
+        };
+        self.queue.write_buffer(
+            &self.chunk_uniform_buffer,
+            0,
+            bytemuck::bytes_of(&chunk_uniforms),
+        );
         // Create the renderpass which will clear the screen.
         let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -585,20 +613,22 @@ impl State {
         // If you wanted to call any drawing commands, they would go here.
 
         // Bind your camera math (just like you did before)
-        renderpass.set_bind_group(0, &self.uniform_bind_groups[0], &[]);
-        renderpass.set_bind_group(1, &self.diffuse_bind_group, &[]);
 
-        // Bind your voxel shader pipeline
+        const RENDER_DISTANCE_CHUNKS: f32 = 16.0; // tune to taste
+
         renderpass.set_pipeline(&self.pipelines[0]);
+        renderpass.set_bind_group(1, &self.diffuse_bind_group, &[]);
+        renderpass.set_bind_group(0, &self.chunk_uniform_bind_group, &[]);
 
-        // Draw the chunk!
-        /*if self.chunk_num_indices > 0 {
-                    renderpass.set_vertex_buffer(0, self.chunk_vertex_buffer.slice(..));
-                    renderpass.set_index_buffer(self.chunk_index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-                    renderpass.draw_indexed(0..self.chunk_num_indices, 0, 0..1);
-        }*/
+        let cam_chunk_x = self.camera.position.x / CHUNK_SIZE as f32;
+        let cam_chunk_z = self.camera.position.z / CHUNK_SIZE as f32;
 
-        for (i, chunk) in self.chunks.values().enumerate() {
+        for chunk in self.chunks.values() {
+            let dx = chunk.chunk_position_x as f32 - cam_chunk_x;
+            let dz = chunk.chunk_position_z as f32 - cam_chunk_z;
+            if (dx * dx + dz * dz).sqrt() > RENDER_DISTANCE_CHUNKS {
+                continue; // skip the draw call entirely
+            }
             if chunk.chunk_mesh.num_indices > 0 {
                 renderpass.set_vertex_buffer(0, chunk.chunk_mesh.vertex_buffer.slice(..));
                 renderpass.set_index_buffer(
@@ -606,8 +636,6 @@ impl State {
                     wgpu::IndexFormat::Uint16,
                 );
                 renderpass.draw_indexed(0..chunk.chunk_mesh.num_indices, 0, 0..1);
-            } else {
-                println!("failed to render chunk: {i}");
             }
         }
 
@@ -622,7 +650,7 @@ impl State {
         let elapsed = self.fps_timer.elapsed();
 
         if elapsed.as_secs_f32() >= 1.0 {
-            let fps = self.frame_count as f32 / elapsed.as_secs_f32();
+           let fps = self.frame_count as f32 / elapsed.as_secs_f32();
 
             println!("FPS: {:.1}", fps);
 

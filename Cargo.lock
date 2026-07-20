@@ -969,6 +969,7 @@ dependencies = [
  "log",
  "noise",
  "pollster",
+ "rayon",
  "wgpu",
  "winit",
 ]
