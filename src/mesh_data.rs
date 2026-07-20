@@ -2,24 +2,22 @@ use noise::{NoiseFn, Perlin};
 
 pub const CHUNK_SIZE: i32 = 25;
 pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
-pub struct MeshData{
+pub struct MeshData {
     pub voxels: [u8; CHUNK_VOLUME],
 }
-impl MeshData{
-pub fn generate_mesh_data(chunk_x: i32, chunk_z: i32) -> MeshData{
-    let voxels: [u8; CHUNK_VOLUME] = Self::generate_terrain(chunk_x, chunk_z);
+impl MeshData {
+    pub fn generate_mesh_data(chunk_x: i32, chunk_z: i32) -> MeshData {
+        let voxels: [u8; CHUNK_VOLUME] = Self::generate_terrain(chunk_x, chunk_z);
 
-    let mut meshdata = Self{
-        voxels,
-    };
-    meshdata
-}
-pub fn get_index(x: i32, y: i32, z: i32) -> usize {
+        let mut meshdata = Self { voxels };
+        meshdata
+    }
+    pub fn get_index(x: i32, y: i32, z: i32) -> usize {
         (x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE) as usize
     }
-fn generate_terrain(chunk_x: i32, chunk_z: i32) -> [u8; CHUNK_VOLUME]{
-     let mut voxels  = [0; CHUNK_VOLUME];
-         let perlin = Perlin::new(89);
+    fn generate_terrain(chunk_x: i32, chunk_z: i32) -> [u8; CHUNK_VOLUME] {
+        let mut voxels = [0; CHUNK_VOLUME];
+        let perlin = Perlin::new(89);
 
         let scale = 0.05;
 
@@ -46,5 +44,5 @@ fn generate_terrain(chunk_x: i32, chunk_z: i32) -> [u8; CHUNK_VOLUME]{
             }
         }
         voxels
-}
+    }
 }

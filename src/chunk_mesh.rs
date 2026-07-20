@@ -1,7 +1,6 @@
-
 use wgpu::util::DeviceExt;
 
-use crate::{CHUNK_VOLUME, Vertex, mesh_data};
+use crate::{CHUNK_SIZE, CHUNK_VOLUME, State, Vertex, data_manager, mesh_data, world_manager};
 pub struct ChunkMesh {
     pub vertex_buffer: wgpu::Buffer,
     pub index_buffer: wgpu::Buffer,
@@ -17,7 +16,8 @@ const DIRECTIONS: [[i32; 3]; 6] = [
     [0, 0, 1],  // Front: look 1 block forward on the positive Z axis
     [0, 0, -1], // Back: look 1 block backward on the negative Z axis
 ];
-impl ChunkMesh{
+
+impl ChunkMesh {
     pub fn get_face_vertices(face_index: usize, x: f32, y: f32, z: f32) -> [Vertex; 4] {
         let x1 = x + 1.0;
         let y1 = y + 1.0;
@@ -147,21 +147,140 @@ impl ChunkMesh{
         z: i32,
         chunk_x: i32,
         chunk_z: i32,
-        voxels: [u8; mesh_data::CHUNK_VOLUME],
+        data_manager: &data_manager::DataManager,
     ) -> u8 {
-        if x < 0 || x >= mesh_data::CHUNK_SIZE || y < 0 || y >= mesh_data::CHUNK_SIZE || z < 0 || z >= mesh_data::CHUNK_SIZE {
-            return 0;
+        let out_of_chunk = x < 0
+            || x >= mesh_data::CHUNK_SIZE
+            || y < 0
+            || y >= mesh_data::CHUNK_SIZE
+            || z < 0
+            || z >= mesh_data::CHUNK_SIZE;
+        let is_landlocked = chunk_x != world_manager::xmax 
+            && chunk_x != world_manager::xmin
+            && chunk_z != world_manager::zmax
+            && chunk_z != world_manager::zmin;
+        if out_of_chunk && is_landlocked {
+            if x < 0 {
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x - 1, chunk_z))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(CHUNK_SIZE - 1, y, z)]
+            } else if x >= mesh_data::CHUNK_SIZE {
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x + 1, chunk_z))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(0, y, z)]
+            }
+            else if y < 0{
+                return 1;
+            } 
+            else if y >= CHUNK_SIZE{
+                return 0;
+            }
+            else if z < 0 {
+               
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x, chunk_z - 1))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(x, y, CHUNK_SIZE - 1)]
+            } else if z >= mesh_data::CHUNK_SIZE {
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x, chunk_z + 1))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(x, y, 0)]
+            } else {
+                return 1;
+            }
+        } else if out_of_chunk && !is_landlocked {
+            if x < 0 && chunk_x-1 != world_manager::xmin - 1{
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x - 1, chunk_z))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(CHUNK_SIZE - 1, y, z)]
+            } else if x >= mesh_data::CHUNK_SIZE && chunk_x + 1 != world_manager::xmax  + 1 {
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x + 1, chunk_z))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(0, y, z)]
+            }
+            else if y < 0{
+                return 1;
+            } 
+            else if y >= CHUNK_SIZE{
+                return 0;
+            }
+            else if z < 0 && chunk_z-1 != world_manager::zmin - 1 {
+               
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x, chunk_z - 1))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(x, y, CHUNK_SIZE - 1)]
+            } else if z >= mesh_data::CHUNK_SIZE && chunk_z + 1 != world_manager::zmax + 1 {
+                
+                data_manager
+                    .chunk_data_dictionary
+                    .get(&(chunk_x, chunk_z + 1))
+                    .unwrap()
+                    .voxels[mesh_data::MeshData::get_index(x, y, 0)]
+            } else {
+                return 1;
+            }
+           
+        } else if !out_of_chunk && !is_landlocked {
+            data_manager
+                .chunk_data_dictionary
+                .get(&(chunk_x, chunk_z))
+                .unwrap()
+                .voxels[mesh_data::MeshData::get_index(x, y, z)]
+        } else {
+            data_manager
+                .chunk_data_dictionary
+                .get(&(chunk_x, chunk_z))
+                .unwrap()
+                .voxels[mesh_data::MeshData::get_index(x, y, z)]
         }
 
-        voxels[mesh_data::MeshData::get_index(x, y, z)]
+        /*if x<0 && chunk_x == world_manager::xmin{
+         return 0;
+        }
+        else if x >= mesh_data::CHUNK_SIZE as i32 && chunk_x == world_manager::xmax{
+         return 0;
+        }
+        else if z < 0 && chunk_z == world_manager::zmin{
+         return 0;
+        }
+        else if z >= mesh_data::CHUNK_SIZE as i32 && chunk_z == world_manager::zmax{
+         return 0;
+        }
+        else if is_landlocked && (x < 0 || x >= mesh_data::CHUNK_SIZE || y < 0 || y >= mesh_data::CHUNK_SIZE || z < 0 || z >= mesh_data::CHUNK_SIZE) {
+         return 0;
+        }
+        else{
+         voxels[mesh_data::MeshData::get_index(x, y, z)]
+        }*/
     }
     pub fn generate_chunk_mesh(
         chunk_x: i32,
         chunk_z: i32,
         device: &wgpu::Device,
-        mesh_data: &mesh_data::MeshData,
+        data_manager: &data_manager::DataManager,
     ) -> ChunkMesh {
-        let mesh_data = mesh_data::MeshData::generate_mesh_data(chunk_x, chunk_z);
+        let mesh_data = data_manager
+            .chunk_data_dictionary
+            .get(&(chunk_x, chunk_z))
+            .unwrap();
         let voxels: [u8; CHUNK_VOLUME] = mesh_data.voxels;
         let mut vertices: Vec<Vertex> = Vec::new();
         let mut indices: Vec<u16> = Vec::new();
@@ -169,7 +288,7 @@ impl ChunkMesh{
         for z in 0..mesh_data::CHUNK_SIZE {
             for y in 0..mesh_data::CHUNK_SIZE {
                 for x in 0..mesh_data::CHUNK_SIZE {
-                    let current_voxel = Self::get_voxel(x, y, z, chunk_x, chunk_z, voxels);
+                    let current_voxel = Self::get_voxel(x, y, z, chunk_x, chunk_z, data_manager);
 
                     if current_voxel == 0 {
                         continue;
@@ -180,7 +299,12 @@ impl ChunkMesh{
                         let neighbor_y = y + dir[1];
                         let neighbor_z = z + dir[2];
                         let neighbor_voxel = Self::get_voxel(
-                            neighbor_x, neighbor_y, neighbor_z, chunk_x, chunk_z, voxels,
+                            neighbor_x,
+                            neighbor_y,
+                            neighbor_z,
+                            chunk_x,
+                            chunk_z,
+                            data_manager,
                         );
 
                         if neighbor_voxel == 0 {
