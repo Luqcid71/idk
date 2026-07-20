@@ -1,7 +1,8 @@
 use glam::{Mat4, Vec3, mat4, vec3};
 mod chunk;
-mod mesh_data;
 mod chunk_mesh;
+mod data_manager;
+mod mesh_data;
 mod world_manager;
 use image::GenericImageView;
 use noise::{NoiseFn, Perlin};
@@ -9,6 +10,7 @@ use std::collections::HashMap;
 use std::collections::hash_map;
 use std::f32::consts::FRAC_PI_2;
 use std::sync::Arc;
+use std::time::Instant;
 use wgpu::util::DeviceExt;
 use winit::window::CursorGrabMode;
 use winit::window::Fullscreen;
@@ -78,10 +80,6 @@ impl Vertex {
 const CHUNK_SIZE: i32 = 25;
 const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
 
-
-
-
-
 struct State {
     instance: wgpu::Instance,
     window: Arc<Window>,
@@ -92,9 +90,9 @@ struct State {
     surface_format: wgpu::TextureFormat,
     shaders: Vec<wgpu::ShaderModule>,
     pipelines: Vec<wgpu::RenderPipeline>,
-    chunks: HashMap<(i32, i32), Chunk>,
-    
-
+    pub chunks: HashMap<(i32, i32), Chunk>,
+    fps_timer: Instant,
+    frame_count: u32,
     uniform_buffers: Vec<wgpu::Buffer>,
     uniform_bind_groups: Vec<wgpu::BindGroup>,
     diffuse_bind_group: wgpu::BindGroup,
@@ -115,7 +113,6 @@ impl Camera {
 }
 
 impl State {
-    
     fn create_index_buffer(device: &wgpu::Device, indices: &[u16], label: &str) -> wgpu::Buffer {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
@@ -183,6 +180,8 @@ impl State {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
+                cull_mode: Some(wgpu::Face::Back),
+                front_face: wgpu::FrontFace::Ccw,
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -409,7 +408,6 @@ impl State {
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/triangle.wgsl").into()),
         });
 
-       
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pipeline layout"),
             bind_group_layouts: &[
@@ -427,13 +425,14 @@ impl State {
             "triangle pipeline",
         );
 
-        
-
         let depth_texture_view = Self::create_depth_texture(&device, size);
 
         // 1. Generate our initial terrain chunk
         let manager = world_manager::WorldManager::generate_world(&device);
         let chunks = manager.chunks;
+        for (key, _value) in &chunks {
+            println!("{},{}", key.0, key.1);
+        }
 
         let state = State {
             instance,
@@ -443,12 +442,11 @@ impl State {
             size,
             surface,
             surface_format,
-            shaders: vec![triangle_shader, ],
-            pipelines: vec![
-                triangle_pipeline,
-                
-            ],
+            shaders: vec![triangle_shader],
+            pipelines: vec![triangle_pipeline],
             chunks,
+            fps_timer: Instant::now(),
+            frame_count: 0,
             uniform_buffers,
             uniform_bind_groups,
             diffuse_bind_group,
@@ -528,7 +526,7 @@ impl State {
             });
         let time = self.start_time.elapsed().as_secs_f32();
         //self.Rotate(time, time, time);
-        self.update_camera(0.5);
+        self.update_camera(2.0);
 
         let view = self.camera.build_view_matrix();
         let projection = Mat4::perspective_rh(
@@ -619,6 +617,18 @@ impl State {
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         surface_texture.present();
+        self.frame_count += 1;
+
+        let elapsed = self.fps_timer.elapsed();
+
+        if elapsed.as_secs_f32() >= 1.0 {
+            let fps = self.frame_count as f32 / elapsed.as_secs_f32();
+
+            println!("FPS: {:.1}", fps);
+
+            self.frame_count = 0;
+            self.fps_timer = Instant::now();
+        }
     }
 }
 
