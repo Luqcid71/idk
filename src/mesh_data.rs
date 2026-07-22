@@ -1,7 +1,7 @@
 use noise::{NoiseFn, Perlin};
 
-pub const CHUNK_SIZE: i32 = 25;
-pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+use crate::{CHUNK_HEIGHT, CHUNK_SIZE, CHUNK_VOLUME, max_terrain_height, min_terrain_height};
+
 pub struct MeshData {
     pub voxels: [u8; CHUNK_VOLUME],
 }
@@ -13,13 +13,13 @@ impl MeshData {
         meshdata
     }
     pub fn get_index(x: i32, y: i32, z: i32) -> usize {
-        (x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_SIZE) as usize
+        (x + y * CHUNK_SIZE + z * CHUNK_SIZE * CHUNK_HEIGHT) as usize
     }
     fn generate_terrain(chunk_x: i32, chunk_z: i32) -> [u8; CHUNK_VOLUME] {
         let mut voxels = [0; CHUNK_VOLUME];
         let perlin = Perlin::new(89);
 
-        let scale = 0.05;
+        let scale = 0.005;
 
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -30,12 +30,23 @@ impl MeshData {
 
                 let normalized_noise = (noise_value + 1.0) / 2.0;
 
-                let terrain_height = (normalized_noise * CHUNK_SIZE as f64) as i32;
-
-                for y in 0..CHUNK_SIZE {
-                    if y <= terrain_height {
+                let mut terrain_height = ((normalized_noise * CHUNK_HEIGHT as f64) as i32 - 15) / 2;
+                let mut dirt_min: i32 = terrain_height - 3;
+                if terrain_height >= max_terrain_height {
+                    terrain_height = max_terrain_height;
+                } else if terrain_height <= min_terrain_height {
+                    terrain_height = min_terrain_height;
+                }
+                for y in 0..CHUNK_HEIGHT {
+                    if y == terrain_height {
                         let index = Self::get_index(x, y, z);
                         voxels[index] = 1;
+                    } else if y < terrain_height && y >= dirt_min {
+                        let index = Self::get_index(x, y, z);
+                        voxels[index] = 2;
+                    } else if y < dirt_min {
+                        let index = Self::get_index(x, y, z);
+                        voxels[index] = 3;
                     } else {
                         let index = Self::get_index(x, y, z);
                         voxels[index] = 0
