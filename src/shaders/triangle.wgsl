@@ -43,11 +43,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     } else if in.block_type == 2u {
         color = vec4<f32>(0.45, 0.33, 0.19, 1.0);
     } else if in.block_type == 3u {
-        color = vec4<f32>(0.5, 0.5, 0.5, 1.0);
+        color = vec4<f32>(0.3, 0.3, 0.3, 1.0);
     } else if in.block_type == 0u {
         color = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     } else {
-        color = vec4<f32>(1.0, 1.0, 1.0, 1.0);
+        color = vec4<f32>(0.0, 1.0, 1.0, 1.0);
     }
     return vec4<f32>(color.rgb * in.light, color.a);
 }

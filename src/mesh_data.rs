@@ -19,7 +19,7 @@ impl MeshData {
         let mut voxels = [0; CHUNK_VOLUME];
         let perlin = Perlin::new(89);
 
-        let scale = 0.005;
+        let scale = 0.0016;
 
         for z in 0..CHUNK_SIZE {
             for x in 0..CHUNK_SIZE {
@@ -27,10 +27,10 @@ impl MeshData {
                 let world_z = (chunk_z * CHUNK_SIZE + z) as f64;
 
                 let noise_value = perlin.get([world_x * scale, world_z * scale]);
-
+                let base_height: i32 = 10;
                 let normalized_noise = (noise_value + 1.0) / 2.0;
-
-                let mut terrain_height = ((normalized_noise * CHUNK_HEIGHT as f64) as i32 - 15) / 2;
+                
+                let mut terrain_height = base_height + (normalized_noise * CHUNK_HEIGHT as f64) as i32;
                 let mut dirt_min: i32 = terrain_height - 3;
                 if terrain_height >= max_terrain_height {
                     terrain_height = max_terrain_height;
@@ -38,13 +38,14 @@ impl MeshData {
                     terrain_height = min_terrain_height;
                 }
                 for y in 0..CHUNK_HEIGHT {
+                    
                     if y == terrain_height {
                         let index = Self::get_index(x, y, z);
                         voxels[index] = 1;
                     } else if y < terrain_height && y >= dirt_min {
                         let index = Self::get_index(x, y, z);
                         voxels[index] = 2;
-                    } else if y < dirt_min {
+                    } else if y < dirt_min && y < terrain_height {
                         let index = Self::get_index(x, y, z);
                         voxels[index] = 3;
                     } else {
