@@ -4,7 +4,7 @@ use dashmap::DashMap;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    CHUNK_SIZE, CHUNK_HEIGHT, CHUNK_VOLUME, State, Vertex, chunk, chunk_manager,
+    CHUNK_HEIGHT, CHUNK_SIZE, CHUNK_VOLUME, State, Vertex, chunk, chunk_manager,
     mesh_data::{self, MeshData},
 };
 pub struct ChunkMesh {
@@ -22,9 +22,23 @@ const DIRECTIONS: [[i32; 3]; 6] = [
     [0, 0, 1],  // Front: look 1 block forward on the positive Z axis
     [0, 0, -1], // Back: look 1 block backward on the negative Z axis
 ];
-
+const FACE_LIGHT: [f32; 6] = [
+    0.7, // 0: +X (east)
+    0.7, // 1: -X (west)
+    1.0, // 2: +Y (top) — brightest, "sunlight"
+    0.4, // 3: -Y (bottom) — darkest, rarely seen anyway
+    0.85, // 4: +Z (south)
+    0.5,  // 5: -Z (north)
+];
 impl ChunkMesh {
-    pub fn get_face_vertices(face_index: usize, x: f32, y: f32, z: f32) -> [Vertex; 4] {
+    pub fn get_face_vertices(
+        face_index: usize,
+        x: f32,
+        y: f32,
+        z: f32,
+        block_type: u32,
+    ) -> [Vertex; 4] {
+        let light = FACE_LIGHT[face_index];
         let x1 = x + 1.0;
         let y1 = y + 1.0;
         let z1 = z + 1.0;
@@ -35,37 +49,54 @@ impl ChunkMesh {
                 Vertex {
                     position: [x1, y, z1],
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x1, y, z],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x1, y1, z],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x1, y1, z1],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             // 1: Left face (-X)
             1 => [
                 Vertex {
                     position: [x, y, z],
+
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x, y, z1],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x, y1, z1],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x, y1, z],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             // 2: Top Face (+Y)
@@ -73,18 +104,26 @@ impl ChunkMesh {
                 Vertex {
                     position: [x1, y1, z],
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x, y1, z],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x, y1, z1],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x1, y1, z1],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             // 3: Bottom Face (-Y)
@@ -92,18 +131,26 @@ impl ChunkMesh {
                 Vertex {
                     position: [x1, y, z1],
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x, y, z1],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x, y, z],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x1, y, z],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             // 4: Front Face (+Z)
@@ -111,18 +158,26 @@ impl ChunkMesh {
                 Vertex {
                     position: [x, y, z1],
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x1, y, z1],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x1, y1, z1],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x, y1, z1],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             // 5: Back Face (-Z)
@@ -130,18 +185,26 @@ impl ChunkMesh {
                 Vertex {
                     position: [x1, y, z],
                     tex_coords: [1.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Right
                 Vertex {
                     position: [x, y, z],
                     tex_coords: [0.0, 1.0],
+                    block_type,
+                    light
                 }, // Bottom-Left
                 Vertex {
                     position: [x, y1, z],
                     tex_coords: [0.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Left
                 Vertex {
                     position: [x1, y1, z],
                     tex_coords: [1.0, 0.0],
+                    block_type,
+                    light
                 }, // Top-Right
             ],
             _ => panic!("Invalid face index"),
@@ -221,6 +284,7 @@ impl ChunkMesh {
                                 (x + (chunk_x * CHUNK_SIZE)) as f32,
                                 y as f32,
                                 (z + (chunk_z * CHUNK_SIZE)) as f32,
+                                current_voxel as u32,
                             );
 
                             vertices.extend_from_slice(&face_verts);

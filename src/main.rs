@@ -28,7 +28,7 @@ pub const min_terrain_height: i32 = 10;
 pub const max_terrain_height: i32 = 220;
 pub const CHUNK_SIZE: i32 = 32;
 pub const CHUNK_HEIGHT: i32 = 256;
-pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT) as usize ;
+pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT) as usize;
 const CHUNK_DIRECTIONS: [[i32; 2]; 4] = [
     [1, 0],  // East (+X)
     [-1, 0], // West (-X)
@@ -54,6 +54,8 @@ struct CameraController {
 struct Vertex {
     position: [f32; 3],
     tex_coords: [f32; 2],
+    block_type: u32,
+    light: f32,
 }
 
 #[repr(C)]
@@ -77,12 +79,21 @@ impl Vertex {
                     shader_location: 1,
                     format: wgpu::VertexFormat::Float32x2,
                 },
+                wgpu::VertexAttribute {
+                    offset: (std::mem::size_of::<[f32; 3]>() + std::mem::size_of::<[f32; 2]>())
+                        as wgpu::BufferAddress,
+                    shader_location: 2,
+                    format: wgpu::VertexFormat::Uint32,
+                },
+                wgpu::VertexAttribute {
+        offset: (std::mem::size_of::<[f32; 3]>() + std::mem::size_of::<[f32; 2]>() + std::mem::size_of::<u32>()) as wgpu::BufferAddress,
+        shader_location: 3,
+        format: wgpu::VertexFormat::Float32,
+    },
             ],
         }
     }
 }
-
-
 
 struct State {
     instance: wgpu::Instance,
@@ -283,7 +294,7 @@ impl State {
         let size = window.inner_size();
 
         // Inside your initialization code:
-        let diffuse_bytes = include_bytes!("placeholder.png"); 
+        let diffuse_bytes = include_bytes!("placeholder.png");
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
         let dimensions = diffuse_image.dimensions();
@@ -553,8 +564,8 @@ impl State {
     fn render(&mut self) {
         const speed: f32 = 45.0;
         let now = Instant::now();
-    let dt = (((now - self.last_frame_time)).as_secs_f32()) * speed * 5.0;
-    self.last_frame_time = now;
+        let dt = ((now - self.last_frame_time).as_secs_f32()) * speed * 5.0;
+        self.last_frame_time = now;
         // Create texture view.
         // NOTE: We must handle Timeout because the surface may be unavailable
         // (e.g., when the window is occluded on macOS).
@@ -632,59 +643,59 @@ impl State {
         let cam_chunk_x = (self.camera.position.x / CHUNK_SIZE as f32).floor() as i32;
         let cam_chunk_z = (self.camera.position.z / CHUNK_SIZE as f32).floor() as i32;
         if (cam_chunk_x, cam_chunk_z) != self.last_cam_chunk {
-        const RENDER_RADIUS: i32 = 16;
-        const VOXEL_RADIUS: i32 = RENDER_RADIUS + 1; // the "skirt", see Part 5
+            const RENDER_RADIUS: i32 = 16;
+            const VOXEL_RADIUS: i32 = RENDER_RADIUS + 1; // the "skirt", see Part 5
 
-        // Collect wanted coordinates so we can sort by distance —
-        // closest chunks should generate first, so the player never
-        // sees a "hole" right in front of them while a far-away chunk
-        // loads first just because of scan order.
-        let mut wanted: Vec<(i32, i32)> = Vec::new();
-        for dz in -VOXEL_RADIUS..=VOXEL_RADIUS {
-            for dx in -VOXEL_RADIUS..=VOXEL_RADIUS {
-                if dx * dx + dz * dz > VOXEL_RADIUS * VOXEL_RADIUS {
-                    continue;
-                } // circle, not square
-                wanted.push((cam_chunk_x + dx, cam_chunk_z + dz));
+            // Collect wanted coordinates so we can sort by distance —
+            // closest chunks should generate first, so the player never
+            // sees a "hole" right in front of them while a far-away chunk
+            // loads first just because of scan order.
+            let mut wanted: Vec<(i32, i32)> = Vec::new();
+            for dz in -VOXEL_RADIUS..=VOXEL_RADIUS {
+                for dx in -VOXEL_RADIUS..=VOXEL_RADIUS {
+                    if dx * dx + dz * dz > VOXEL_RADIUS * VOXEL_RADIUS {
+                        continue;
+                    } // circle, not square
+                    wanted.push((cam_chunk_x + dx, cam_chunk_z + dz));
+                }
             }
-        }
-        wanted.sort_by_key(|&(cx, cz)| {
-            let dx = cx - cam_chunk_x;
-            let dz = cz - cam_chunk_z;
-            dx * dx + dz * dz
-        });
-
-        let mut dispatched = 0;
-        const MAX_DISPATCH_PER_FRAME: usize = 4; // throttle — see why below
-        for (cx, cz) in wanted {
-            if self.chunk_manager.voxel_data.contains_key(&(cx, cz)) {
-                continue;
-            }
-            self.chunk_manager.request_chunk(cx, cz);
-            dispatched += 1;
-            if dispatched >= MAX_DISPATCH_PER_FRAME {
-                break;
-            }
-        }
-        const UNLOAD_MARGIN: i32 = 4; // hysteresis, explained below
-        let unload_radius = RENDER_RADIUS + UNLOAD_MARGIN;
-
-        let to_remove: Vec<(i32, i32)> = self
-            .chunks
-            .keys()
-            .filter(|&&(cx, cz)| {
+            wanted.sort_by_key(|&(cx, cz)| {
                 let dx = cx - cam_chunk_x;
                 let dz = cz - cam_chunk_z;
-                dx * dx + dz * dz > unload_radius * unload_radius
-            })
-            .copied()
-            .collect();
+                dx * dx + dz * dz
+            });
 
-        for key in to_remove {
-            self.chunks.remove(&key); // drops GPU buffers (Drop impl on wgpu::Buffer)
-            self.chunk_manager.voxel_data.remove(&key); // frees the Arc<MeshData> (once other holders, if any, finish)
+            let mut dispatched = 0;
+            const MAX_DISPATCH_PER_FRAME: usize = 4; // throttle — see why below
+            for (cx, cz) in wanted {
+                if self.chunk_manager.voxel_data.contains_key(&(cx, cz)) {
+                    continue;
+                }
+                self.chunk_manager.request_chunk(cx, cz);
+                dispatched += 1;
+                if dispatched >= MAX_DISPATCH_PER_FRAME {
+                    break;
+                }
+            }
+            const UNLOAD_MARGIN: i32 = 4; // hysteresis, explained below
+            let unload_radius = RENDER_RADIUS + UNLOAD_MARGIN;
+
+            let to_remove: Vec<(i32, i32)> = self
+                .chunks
+                .keys()
+                .filter(|&&(cx, cz)| {
+                    let dx = cx - cam_chunk_x;
+                    let dz = cz - cam_chunk_z;
+                    dx * dx + dz * dz > unload_radius * unload_radius
+                })
+                .copied()
+                .collect();
+
+            for key in to_remove {
+                self.chunks.remove(&key); // drops GPU buffers (Drop impl on wgpu::Buffer)
+                self.chunk_manager.voxel_data.remove(&key); // frees the Arc<MeshData> (once other holders, if any, finish)
+            }
         }
-    }
         // Create the renderpass which will clear the screen.
         let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
