@@ -1,9 +1,9 @@
 use glam::{Mat4, Vec3, mat4, vec3};
 mod chunk;
+mod chunk_manager;
 mod chunk_mesh;
-mod data_manager;
 mod mesh_data;
-mod world_manager;
+
 use image::GenericImageView;
 use noise::{NoiseFn, Perlin};
 use std::collections::HashMap;
@@ -23,7 +23,12 @@ use winit::{
 };
 
 use crate::chunk::Chunk;
-
+use crate::chunk_mesh::ChunkMesh;
+pub const min_terrain_height: i32 = 10;
+pub const max_terrain_height: i32 = 220;
+pub const CHUNK_SIZE: i32 = 32;
+pub const CHUNK_HEIGHT: i32 = 256;
+pub const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT) as usize ;
 const CHUNK_DIRECTIONS: [[i32; 2]; 4] = [
     [1, 0],  // East (+X)
     [-1, 0], // West (-X)
@@ -77,11 +82,11 @@ impl Vertex {
     }
 }
 
-const CHUNK_SIZE: i32 = 32;
-const CHUNK_VOLUME: usize = (CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE) as usize;
+
 
 struct State {
     instance: wgpu::Instance,
+    last_frame_time: Instant,
     window: Arc<Window>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -93,6 +98,7 @@ struct State {
     pub chunks: HashMap<(i32, i32), Chunk>,
     fps_timer: Instant,
     frame_count: u32,
+    chunk_manager: chunk_manager::ChunkManager,
     uniform_buffers: Vec<wgpu::Buffer>,
     uniform_bind_groups: Vec<wgpu::BindGroup>,
     diffuse_bind_group: wgpu::BindGroup,
@@ -100,7 +106,7 @@ struct State {
     depth_texture_view: wgpu::TextureView,
     camera: Camera,
     camera_controller: CameraController,
-
+    last_cam_chunk: (i32, i32),
     object_positions: Vec<Vec3>,
     chunk_uniform_buffer: wgpu::Buffer,
     chunk_uniform_bind_group: wgpu::BindGroup,
@@ -115,7 +121,38 @@ impl Camera {
 }
 
 impl State {
-    fn create_index_buffer(device: &wgpu::Device, indices: &[u16], label: &str) -> wgpu::Buffer {
+    fn integrate_finished_meshes(&mut self) {
+        // Drain everything currently sitting in the mesh-completion channel.
+        // Note this can process MORE than one chunk per frame if multiple
+        // finished since the last frame — that's fine, GPU buffer creation
+        // is fast; the expensive part (meshing) already happened off-thread.
+        while let Ok(((cx, cz), vertices, indices)) = self.chunk_manager.mesh_rx.try_recv() {
+            let vertex_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Chunk Vertex Buffer"),
+                    contents: bytemuck::cast_slice(&vertices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
+            let index_buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("Chunk Index Buffer"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::INDEX,
+                });
+            let mesh = ChunkMesh {
+                vertex_buffer,
+                index_buffer,
+                num_indices: indices.len() as u32,
+                chunk_x: cx,
+                chunk_z: cz,
+            };
+            let chunk = Chunk::new_chunk(cx, cz, &self.device, mesh);
+            self.chunks.insert((cx, cz), chunk); // this is what your render() loop iterates
+        }
+    }
+    fn create_index_buffer(device: &wgpu::Device, indices: &[u32], label: &str) -> wgpu::Buffer {
         device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
             contents: bytemuck::cast_slice(indices),
@@ -246,7 +283,7 @@ impl State {
         let size = window.inner_size();
 
         // Inside your initialization code:
-        let diffuse_bytes = include_bytes!("placeholder.png"); // Assuming you have a dirt.png
+        let diffuse_bytes = include_bytes!("placeholder.png"); 
         let diffuse_image = image::load_from_memory(diffuse_bytes).unwrap();
         let diffuse_rgba = diffuse_image.to_rgba8();
         let dimensions = diffuse_image.dimensions();
@@ -430,11 +467,9 @@ impl State {
         let depth_texture_view = Self::create_depth_texture(&device, size);
 
         // 1. Generate our initial terrain chunk
-        let manager = world_manager::WorldManager::generate_world(&device);
-        let chunks = manager.chunks;
-        for (key, _value) in &chunks {
-            println!("{},{}", key.0, key.1);
-        }
+
+        let chunks: HashMap<(i32, i32), Chunk> = HashMap::new();
+
         let chunk_uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("chunk uniform buffer"),
             contents: bytemuck::bytes_of(&Uniforms {
@@ -450,12 +485,18 @@ impl State {
                 resource: chunk_uniform_buffer.as_entire_binding(),
             }],
         });
+        let chunk_manager = chunk_manager::ChunkManager::new();
+        let last_frame_time = Instant::now();
+        let last_cam_chunk = (i32::MIN, i32::MIN);
         let state = State {
             chunk_uniform_bind_group,
             chunk_uniform_buffer,
+            last_frame_time,
+            last_cam_chunk,
             instance,
             window,
             device,
+            chunk_manager,
             queue,
             size,
             surface,
@@ -510,6 +551,10 @@ impl State {
     }
 
     fn render(&mut self) {
+        const speed: f32 = 45.0;
+        let now = Instant::now();
+    let dt = (((now - self.last_frame_time)).as_secs_f32()) * speed * 5.0;
+    self.last_frame_time = now;
         // Create texture view.
         // NOTE: We must handle Timeout because the surface may be unavailable
         // (e.g., when the window is occluded on macOS).
@@ -544,7 +589,7 @@ impl State {
             });
         let time = self.start_time.elapsed().as_secs_f32();
         //self.Rotate(time, time, time);
-        self.update_camera(2.0);
+        self.update_camera(dt);
 
         let view = self.camera.build_view_matrix();
         let projection = Mat4::perspective_rh(
@@ -580,6 +625,66 @@ impl State {
             0,
             bytemuck::bytes_of(&chunk_uniforms),
         );
+        // Called once per frame, before the render pass.
+        self.chunk_manager.poll_voxel_completions(); // stage 1 -> stage 2 dispatch
+        self.integrate_finished_meshes(); // stage 2 -> stage 3 (GPU upload)
+
+        let cam_chunk_x = (self.camera.position.x / CHUNK_SIZE as f32).floor() as i32;
+        let cam_chunk_z = (self.camera.position.z / CHUNK_SIZE as f32).floor() as i32;
+        if (cam_chunk_x, cam_chunk_z) != self.last_cam_chunk {
+        const RENDER_RADIUS: i32 = 16;
+        const VOXEL_RADIUS: i32 = RENDER_RADIUS + 1; // the "skirt", see Part 5
+
+        // Collect wanted coordinates so we can sort by distance —
+        // closest chunks should generate first, so the player never
+        // sees a "hole" right in front of them while a far-away chunk
+        // loads first just because of scan order.
+        let mut wanted: Vec<(i32, i32)> = Vec::new();
+        for dz in -VOXEL_RADIUS..=VOXEL_RADIUS {
+            for dx in -VOXEL_RADIUS..=VOXEL_RADIUS {
+                if dx * dx + dz * dz > VOXEL_RADIUS * VOXEL_RADIUS {
+                    continue;
+                } // circle, not square
+                wanted.push((cam_chunk_x + dx, cam_chunk_z + dz));
+            }
+        }
+        wanted.sort_by_key(|&(cx, cz)| {
+            let dx = cx - cam_chunk_x;
+            let dz = cz - cam_chunk_z;
+            dx * dx + dz * dz
+        });
+
+        let mut dispatched = 0;
+        const MAX_DISPATCH_PER_FRAME: usize = 4; // throttle — see why below
+        for (cx, cz) in wanted {
+            if self.chunk_manager.voxel_data.contains_key(&(cx, cz)) {
+                continue;
+            }
+            self.chunk_manager.request_chunk(cx, cz);
+            dispatched += 1;
+            if dispatched >= MAX_DISPATCH_PER_FRAME {
+                break;
+            }
+        }
+        const UNLOAD_MARGIN: i32 = 4; // hysteresis, explained below
+        let unload_radius = RENDER_RADIUS + UNLOAD_MARGIN;
+
+        let to_remove: Vec<(i32, i32)> = self
+            .chunks
+            .keys()
+            .filter(|&&(cx, cz)| {
+                let dx = cx - cam_chunk_x;
+                let dz = cz - cam_chunk_z;
+                dx * dx + dz * dz > unload_radius * unload_radius
+            })
+            .copied()
+            .collect();
+
+        for key in to_remove {
+            self.chunks.remove(&key); // drops GPU buffers (Drop impl on wgpu::Buffer)
+            self.chunk_manager.voxel_data.remove(&key); // frees the Arc<MeshData> (once other holders, if any, finish)
+        }
+    }
         // Create the renderpass which will clear the screen.
         let mut renderpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -633,7 +738,7 @@ impl State {
                 renderpass.set_vertex_buffer(0, chunk.chunk_mesh.vertex_buffer.slice(..));
                 renderpass.set_index_buffer(
                     chunk.chunk_mesh.index_buffer.slice(..),
-                    wgpu::IndexFormat::Uint16,
+                    wgpu::IndexFormat::Uint32,
                 );
                 renderpass.draw_indexed(0..chunk.chunk_mesh.num_indices, 0, 0..1);
             }
@@ -650,7 +755,7 @@ impl State {
         let elapsed = self.fps_timer.elapsed();
 
         if elapsed.as_secs_f32() >= 1.0 {
-           let fps = self.frame_count as f32 / elapsed.as_secs_f32();
+            let fps = self.frame_count as f32 / elapsed.as_secs_f32();
 
             println!("FPS: {:.1}", fps);
 
